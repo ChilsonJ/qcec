@@ -33,7 +33,8 @@ class CMakeBuild(build_ext):
 
         cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
                       '-DPYTHON_EXECUTABLE=' + sys.executable,
-                      '-DBINDINGS=ON']
+                      '-DBINDINGS=ON',
+                      '-DDEPLOY=ON']
 
         cfg = 'Debug' if self.debug else 'Release'
         build_args = ['--config', cfg]
@@ -46,10 +47,7 @@ class CMakeBuild(build_ext):
             build_args += ['--', '/m']
         else:
             cmake_args += ['-DCMAKE_BUILD_TYPE=' + cfg]
-            cpus = os.cpu_count()
-            if cpus is None:
-                cpus = 2
-            build_args += ['--', '-j{}'.format(cpus)]
+            build_args += ['--', '-j2']
 
         env = os.environ.copy()
         env['CXXFLAGS'] = '{} -DVERSION_INFO=\\"{}\\"'.format(env.get('CXXFLAGS', ''),
@@ -67,7 +65,7 @@ with open(README_PATH) as readme_file:
 
 setup(
     name='jkq.qcec',
-    version='1.10.1',
+    version='1.9.1',
     author='Lukas Burgholzer',
     author_email='lukas.burgholzer@jku.at',
     description='QCEC - A JKQ tool for Quantum Circuit Equivalence Checking',

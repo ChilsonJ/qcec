@@ -208,8 +208,7 @@ TEST_F(GeneralTest, InvalidStrategy) {
     qc_original.emplace_back<qc::StandardOperation>(1, 0, qc::X);
 
     ec::ImprovedDDEquivalenceChecker ec2(qc_original, qc_original);
-    ec::Configuration                config{};
-    config.strategy = ec::Strategy::CompilationFlow;
+    ec::Configuration                config{.strategy = ec::Strategy::CompilationFlow};
     EXPECT_THROW(ec2.check(config), std::invalid_argument);
 }
 

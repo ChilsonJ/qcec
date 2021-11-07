@@ -12,6 +12,151 @@
 #include <iostream>
 #include <locale>
 #include <string>
+#include <fstream> // exp
+#include <csignal> // exp
+#include <sys/time.h> //estimate time
+
+/*
+ * Author:  David Robert Nadeau
+ * Site:    http://NadeauSoftware.com/
+ * License: Creative Commons Attribution 3.0 Unported License
+ *          http://creativecommons.org/licenses/by/3.0/deed.en_US
+ */
+
+/* usage
+size_t currentSize = getCurrentRSS( );
+size_t peakSize    = getPeakRSS( );
+*/
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <psapi.h>
+
+#elif defined(__unix__) || defined(__unix) || defined(unix) || (defined(__APPLE__) && defined(__MACH__))
+#include <unistd.h>
+#include <sys/resource.h>
+
+#if defined(__APPLE__) && defined(__MACH__)
+#include <mach/mach.h>
+
+#elif (defined(_AIX) || defined(__TOS__AIX__)) || (defined(__sun__) || defined(__sun) || defined(sun) && (defined(__SVR4) || defined(__svr4__)))
+#include <fcntl.h>
+#include <procfs.h>
+
+#elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
+#include <stdio.h>
+
+#endif
+
+#else
+#error "Cannot define getPeakRSS( ) or getCurrentRSS( ) for an unknown OS."
+#endif
+
+
+/**
+ * Returns the peak (maximum so far) resident set size (physical
+ * memory use) measured in bytes, or zero if the value cannot be
+ * determined on this OS.
+ */
+size_t getPeakRSS()
+{
+#if defined(_WIN32)
+    /* Windows -------------------------------------------------- */
+    PROCESS_MEMORY_COUNTERS info;
+    GetProcessMemoryInfo( GetCurrentProcess( ), &info, sizeof(info) );
+    return (size_t)info.PeakWorkingSetSize;
+
+#elif (defined(_AIX) || defined(__TOS__AIX__)) || (defined(__sun__) || defined(__sun) || defined(sun) && (defined(__SVR4) || defined(__svr4__)))
+    /* AIX and Solaris ------------------------------------------ */
+    struct psinfo psinfo;
+    int fd = -1;
+    if ( (fd = open( "/proc/self/psinfo", O_RDONLY )) == -1 )
+        return (size_t)0L;      /* Can't open? */
+    if ( read( fd, &psinfo, sizeof(psinfo) ) != sizeof(psinfo) )
+    {
+        close( fd );
+        return (size_t)0L;      /* Can't read? */
+    }
+    close( fd );
+    return (size_t)(psinfo.pr_rssize * 1024L);
+
+#elif defined(__unix__) || defined(__unix) || defined(unix) || (defined(__APPLE__) && defined(__MACH__))
+    /* BSD, Linux, and OSX -------------------------------------- */
+    struct rusage rusage;
+    getrusage( RUSAGE_SELF, &rusage );
+#if defined(__APPLE__) && defined(__MACH__)
+    return (size_t)rusage.ru_maxrss;
+#else
+    return (size_t)(rusage.ru_maxrss * 1024L);
+#endif
+
+#else
+    /* Unknown OS ----------------------------------------------- */
+    return (size_t)0L;          /* Unsupported. */
+#endif
+}
+
+
+
+
+
+/**
+ * Returns the current resident set size (physical memory use) measured
+ * in bytes, or zero if the value cannot be determined on this OS.
+ */
+size_t getCurrentRSS()
+{
+#if defined(_WIN32)
+    /* Windows -------------------------------------------------- */
+    PROCESS_MEMORY_COUNTERS info;
+    GetProcessMemoryInfo( GetCurrentProcess( ), &info, sizeof(info) );
+    return (size_t)info.WorkingSetSize;
+
+#elif defined(__APPLE__) && defined(__MACH__)
+    /* OSX ------------------------------------------------------ */
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+    if ( task_info( mach_task_self( ), MACH_TASK_BASIC_INFO,
+        (task_info_t)&info, &infoCount ) != KERN_SUCCESS )
+        return (size_t)0L;      /* Can't access? */
+    return (size_t)info.resident_size;
+
+#elif defined(__linux__) || defined(__linux) || defined(linux) || defined(__gnu_linux__)
+    /* Linux ---------------------------------------------------- */
+    long rss = 0L;
+    FILE* fp = NULL;
+    if ( (fp = fopen( "/proc/self/statm", "r" )) == NULL )
+        return (size_t)0L;      /* Can't open? */
+    if ( fscanf( fp, "%*s%ld", &rss ) != 1 )
+    {
+        fclose( fp );
+        return (size_t)0L;      /* Can't read? */
+    }
+    fclose( fp );
+    return (size_t)rss * (size_t)sysconf( _SC_PAGESIZE);
+
+#else
+    /* AIX, BSD, Solaris, and Unknown OS ------------------------ */
+    return (size_t)0L;          /* Unsupported. */
+#endif
+}
+
+
+
+std::ofstream outFile;
+double fid = 0;
+bool isFid;
+
+void signalHandler(int signum) 
+{
+    std::cout << "Interrupt signal (" << signum << ") received.\n";
+
+    outFile << "TO/MO" << std::endl;
+    outFile.close();
+
+    // terminate program  
+    exit(signum);  
+}
 
 void show_usage(const std::string& name) {
     std::cerr << "Usage: " << name << " <PATH_TO_FILE_1> <PATH_TO_FILE_2> (--method <method>)    " << std::endl;
@@ -44,8 +189,8 @@ void show_usage(const std::string& name) {
 }
 
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        if (argc == 2) {
+    if (argc < 5) {
+        if (argc == 4) {
             std::string cmd = argv[1];
             std::transform(cmd.begin(), cmd.end(), cmd.begin(), [](unsigned char c) { return ::tolower(c); });
             if (cmd == "--help" || cmd == "-h")
@@ -60,11 +205,18 @@ int main(int argc, char** argv) {
     std::string file1 = argv[1];
     std::string file2 = argv[2];
 
+    outFile.open(argv[3], std::ios::app);
+    signal(SIGTERM, signalHandler);
+
+    std::string isFid_str = argv[4];
+    if (isFid_str == "-f") isFid = 1;
+    else isFid = 0;
+
     ec::Configuration config{};
 
     // parse configuration options
-    if (argc >= 4) {
-        for (int i = 3; i < argc; ++i) {
+    if (argc >= 6) {
+        for (int i = 5; i < argc; ++i) {
             std::string cmd = argv[i];
             std::transform(cmd.begin(), cmd.end(), cmd.begin(), [](unsigned char c) { return ::tolower(c); });
 
@@ -188,6 +340,13 @@ int main(int argc, char** argv) {
     qc::QuantumComputation qc1(file1);
     qc::QuantumComputation qc2(file2);
 
+    struct timeval t1, t2;
+    double elapsedTime;
+    double runtime;
+
+    // start timer
+    gettimeofday(&t1, NULL);
+
     // perform equivalence check
     ec::EquivalenceCheckingResults results{};
     if (config.strategy == ec::Strategy::CompilationFlow) {
@@ -201,6 +360,16 @@ int main(int argc, char** argv) {
         results = ec.check(config);
     }
     results.printJSON();
+
+    //end timer
+    gettimeofday(&t2, NULL);
+    elapsedTime = (t2.tv_sec - t1.tv_sec) * 1000.0;
+    elapsedTime += (t2.tv_usec - t1.tv_usec) / 1000.0;
+    runtime = elapsedTime / 1000;
+
+    if (isFid)  outFile << runtime << "," << getPeakRSS() << "," << fid << std::endl;
+    else outFile << runtime << "," << getPeakRSS() << std::endl;
+    outFile.close();
 
     return 0;
 }

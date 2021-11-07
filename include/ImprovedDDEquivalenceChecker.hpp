@@ -13,6 +13,9 @@
 #include <memory>
 #include <unordered_set>
 
+extern double fid;
+extern bool isFid;
+
 namespace ec {
 
     class ImprovedDDEquivalenceChecker: public EquivalenceChecker {
@@ -22,6 +25,11 @@ namespace ec {
         void checkProportional(qc::MatrixDD& result, qc::Permutation& perm1, qc::Permutation& perm2);
         /// Look-ahead LEFT and RIGHT and choose the more promising option
         void checkLookahead(qc::MatrixDD& result, qc::Permutation& perm1, qc::Permutation& perm2);
+
+        dd::fp * traceRecur(dd::Package::mNode * cur, std::map<dd::Package::mNode *, dd::fp *> *Node_Table);
+        dd::fp * complex2fp(const dd::Complex &c);
+        dd::fp * add(dd::fp * a, dd::fp * b);
+        dd::fp * mul(dd::fp * a, dd::fp * b);
 
     protected:
         /// Create the initial matrix used for the G->I<-G' scheme.

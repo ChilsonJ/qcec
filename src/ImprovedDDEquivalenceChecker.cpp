@@ -52,6 +52,90 @@ namespace ec {
         return goalMatrix;
     }
 
+
+
+    dd::fp* ImprovedDDEquivalenceChecker::traceRecur(dd::Package::mNode * cur, std::map<dd::Package::mNode *, dd::fp *> *Node_Table) {
+        // std::cout<<0<<std::endl;
+        std::map<dd::Package::mNode *, dd::fp *>::iterator it;
+        if (!(dd::Package::mNode::isTerminal(cur->e[0].p)) && (Node_Table->find(cur->e[0].p) == Node_Table->end()))
+        {
+            // std::cout<<1<<std::endl;
+            dd::fp * dum = traceRecur(cur->e[0].p, Node_Table);
+            // std::cout<<2<<std::endl;
+        }
+        if (!(dd::Package::mNode::isTerminal(cur->e[3].p)) && (Node_Table->find(cur->e[3].p) == Node_Table->end()))
+            dd::fp * dum = traceRecur(cur->e[3].p, Node_Table);
+
+        dd::fp * left;
+        dd::fp * right;
+        if (dd::Package::mNode::isTerminal(cur->e[0].p)) {
+            left = new dd::fp[2]; 
+            left[0] = 1.0;
+            left[1] = 0.0;
+        }
+        else {
+            it = Node_Table->find(cur->e[0].p);
+            assert(it != Node_Table->end());
+            left = it->second;
+            // std::cout << "  left: " << left << std::endl;
+        }
+        if (dd::Package::mNode::isTerminal(cur->e[3].p)) {
+            right = new dd::fp[2]; 
+            right[0] = 1.0;
+            right[1] = 0.0;
+        }
+        else {
+            it = Node_Table->find(cur->e[3].p);
+            assert(it != Node_Table->end());
+            right = it->second;
+            // std::cout << "  right: " << right << std::endl;
+        }
+        // std::cout << "  wl: " << cur->e[0].w << std::endl;
+        // std::cout << "  wr: " << cur->e[3].w << std::endl;
+        dd::fp * w0 = complex2fp(cur->e[0].w);
+        dd::fp * w1 = complex2fp(cur->e[3].w);
+        dd::fp * le = mul(w0, left);
+        dd::fp * re = mul(w1, right);
+        // std::cout << "  le: " << le << std::endl;
+        // std::cout << "  re: " << re << std::endl;
+        dd::fp * sum = add(le, re);
+        (*Node_Table)[cur] = sum;
+        // std::cout << "  sum: " << sum << std::endl << std::endl;
+        // clear 
+        if (dd::Package::mNode::isTerminal(cur->e[0].p)) delete [] left;
+        if (dd::Package::mNode::isTerminal(cur->e[3].p)) delete [] right;
+        delete [] w0;
+        delete [] w1;
+        delete [] le;
+        delete [] re;
+        
+        return sum;
+    }
+
+    dd::fp * ImprovedDDEquivalenceChecker::complex2fp(const dd::Complex &c)
+    {
+        dd::fp * a = new dd::fp[2];
+        a[0] = dd::CTEntry::val(c.r);
+        a[1] = dd::CTEntry::val(c.i);
+        return a;
+    }
+
+    dd::fp * ImprovedDDEquivalenceChecker::add(dd::fp * a, dd::fp * b)
+    {
+        dd::fp * r = new dd::fp[2];
+        r[0] = a[0] + b[0];
+        r[1] = a[1] + b[1];
+        return r;
+    }
+
+    dd::fp * ImprovedDDEquivalenceChecker::mul(dd::fp * a, dd::fp * b)
+    {
+        dd::fp * r = new dd::fp[2];
+        r[0] = a[0] * b[0] - a[1] * b[1];
+        r[1] = a[0] * b[1] + a[1] * b[0];
+        return r;
+    }
+
     /// Use dedicated method to check the equivalence of both provided circuits
     EquivalenceCheckingResults ImprovedDDEquivalenceChecker::check(const Configuration& config) {
         EquivalenceCheckingResults results{};
@@ -98,6 +182,24 @@ namespace ec {
         results.result = dd->reduceGarbage(results.result, garbage2, RIGHT);
         results.result = dd->reduceAncillae(results.result, ancillary1, LEFT);
         results.result = dd->reduceAncillae(results.result, ancillary2, RIGHT);
+
+        // fidelity
+        if (isFid)
+        {
+            std::map<dd::Package::mNode *, dd::fp *> Node_Table;
+            std::map<dd::Package::mNode *, dd::fp *>::iterator it;
+            dd::fp * sum = traceRecur(results.result.p, &Node_Table);
+            dd::fp * w = complex2fp(results.result.w);
+            dd::fp * sum_w = mul(w, sum);
+            // std::cout << "  sum_w: " << sum_w << std::endl;
+            fid = (sum_w[0]*sum_w[0] + sum_w[1]*sum_w[1])/(pow(2, 2*nqubits));
+            std::cout << "  Fidelity: " << fid << std::endl;
+            // clear
+            delete [] w;
+            delete [] sum_w;
+            for (it = Node_Table.begin(); it != Node_Table.end(); it++) delete [] it->second;
+            Node_Table.clear();
+        }
 
         results.equivalence = equals(results.result, createGoalMatrix());
         results.maxActive   = std::max(results.maxActive, dd->mUniqueTable.getMaxActiveNodes());
